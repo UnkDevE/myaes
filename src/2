@@ -5,8 +5,7 @@ module Aes (
 
 import qualified Data.Vector as V
 import qualified Data.Matrix as M
-import System.Random (RandomRIO)
-import Control.Monad (replicateM)
+import System.Random 
 import Data.Word8
 import Data.List
 import Data.Bits
@@ -15,9 +14,8 @@ decrypt :: V.Vector Word8 -> V.Vector Word8 -> V.Vector Word8
 decrypt ciphertext key  
 
 encrypt :: V.Vector Word8 -> V.Vector Word8 -> V.Vector Word8
-encrypt plaintext key = do
-    iv <- randList (length pptext)
-    return $ V.concat V.last V.scanr (\t ikey -> 
+encrypt plaintext key = 
+    V.concat V.last V.scanr (\t ikey -> 
         let text = xorVec $ take (length key) $ 
                 drop (((length pptext / (length key)) - ikey) * 4) pptext
          in 
@@ -25,12 +23,14 @@ encrypt plaintext key = do
             (matToVec $ exkey ikey $ shiftRows $ vecToMat $ subWord $ iterate 
             (matToVec $ exkey ikey $ mixColumns $ shiftRows $ vecToMat $ subWord) text 
             !! ((length key / 4) + 5)):t) 
-        [iv] V.fromList [(length key), (length key) * 2, (length pptext)]
+        V.fromList [(length key), (length key) * 2, (length pptext)]
     where exkey ikey t = xorVec (map (expandKey key) [(ikey - 4)..(ikey - 1)])
           pptext = pad plaintext key
 
-randList :: (Num a) => Int -> IO[a]
-randList n = replicateM n $ randomRIO (0, 255)
+iv :: V.Vector Word8
+iv  
+
+randList :: (Num a) => Int -> IO [a]
 
 pad :: V.Vector Word8 -> V.Vector Word8 -> V.Vector Word8
 pad text key = text V.++ (repeatedly (rem (length text) (length key)) 0)
