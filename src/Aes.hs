@@ -5,29 +5,58 @@ module Aes (
 
 import qualified Data.Vector as V
 import qualified Data.Matrix as M
-import System.Random (RandomRIO)
+import System.Random (randomRIO)
 import Control.Monad (replicateM)
 import Data.Word8
 import Data.List
 import Data.Bits
 
 decrypt :: V.Vector Word8 -> V.Vector Word8 -> V.Vector Word8
-decrypt ciphertext key  
+decrypt ciphertext key iv = V.concat $ V.last $ V.scanl (\t ikey -> 
+    let text = take (length key) $ drop ikey ciphertext
+    in xorVec iv $ (iterate (invSubBytes $ invShiftRows $ invMixColumns $ xorVec key) 
+        invSubBytes $ invShiftRows $ xorVec text key) !! [(length key / 4) + 5])
+    (V.fromList [iv]) $ V.fromList [(length key), (length key) * 2, (length ciphertext)]
 
-encrypt :: V.Vector Word8 -> V.Vector Word8 -> V.Vector Word8
+
+invShiftRows :: (Any a) => M.Matrix a -> M.Matrix a
+invShiftRows = shiftRows invRotWord
+
+invRotWord :: V.Vector Word8 -> V.Vector Word8
+invRotWord xs = V.last xs:(V.init xs)
+
+invMixColumns :: (Any a) => M.Matrix a -> M.Matrix a 
+invMixColumns = mixColumns invMixColumnsConst 
+
+invMixCoulmnsConst :: M.Matrix Word8
+invMixColumnsConst = M.fromList [[14, 11, 13, 9],
+                                 [9, 14, 11, 13],
+                                 [13, 9, 14, 11],
+                                 [11, 13, 9, 14]]
+
+invSubBytes :: V.Vector Word8 -> V.Vector Word8
+invSubBytes = V.map invSBox
+
+invSBox :: Word8 -> Word8
+invSBox b = 
+    (rotateL 1 $ sBox b) `xor` (rotateL 3 $ sBox b) `xor` (rotateL 6 $ sBox b) `xor` 5
+
+encrypt :: V.Vector Word8 -> V.Vector Word8 -> IO(V.Vector Word8, V.VectorWord8)
 encrypt plaintext key = do
-    iv <- randList (length pptext)
-    return $ V.concat V.last V.scanr (\t ikey -> 
-        let text = xorVec $ take (length key) $ 
-                drop (((length pptext / (length key)) - ikey) * 4) pptext
+    ivl <- randList (length pptext)
+    let iv = V.fromList ivl 
+    return $ (,) iv $ V.concat V.last V.scanl (\t ikey -> 
+        let text = xorVec $ take (length key) $ drop ikey pptext
          in 
-            xor (last t) 
+            xorVec (last t) 
             (matToVec $ exkey ikey $ shiftRows $ vecToMat $ subWord $ iterate 
             (matToVec $ exkey ikey $ mixColumns $ shiftRows $ vecToMat $ subWord) text 
             !! ((length key / 4) + 5)):t) 
-        [iv] V.fromList [(length key), (length key) * 2, (length pptext)]
-    where exkey ikey t = xorVec (map (expandKey key) [(ikey - 4)..(ikey - 1)])
-          pptext = pad plaintext key
+        (V.fromList [iv]) $ V.fromList [(length key), (length key) * 2, (length pptext)]
+    where pptext = pad plaintext key
+
+exkey :: V.Vector Word8 -> V.Vector Word8 -> V.Vector Word8
+exkey ikey t = xorVec $ V.fromList (map (expandKey key) [ikey..(ikey + length key)])
 
 randList :: (Num a) => Int -> IO[a]
 randList n = replicateM n $ randomRIO (0, 255)
@@ -37,17 +66,23 @@ pad text key = text V.++ (repeatedly (rem (length text) (length key)) 0)
 
 xorVec :: V.Vector Word8 -> V.Vector Word8 -> V.Vector Word8
 xorVec key = 
-        map (\(cbit, kbit) -> cbit `xor` kbit) $ zip text key 
+        V.map (\(cbit, kbit) -> cbit `xor` kbit) $ zip text key 
 
-shiftRows :: (Any a) => M.Matrix a -> M.Matrix a 
-shiftRows mat = 
+shiftRowsFwd :: (Any a) => M.Matrix a -> M.Matrix a 
+shiftRowsFwd mat = shiftRows rotWord
+
+shiftRows :: (Any a) => (V.Vector Word8 -> V.Vector Word8) -> M.Matrix a -> M.Matrix a
+shiftRows wordRotFn mat = 
     vecToMat $ V.concat $ V.map 
-        (\i -> (iterate rotWord $ M.getRow i mat) !! i) $ V.fromList [1..(M.nrows mat)] 
+        (\i -> (iterate wordRotFn $ M.getRow i mat) !! i) $ V.fromList [1..(M.nrows mat)] 
 
-mixColumns :: (Any a) => M.Matrix a -> M.Matrix a
-mixColumns mat = 
+mixCoulmnsFwd :: (Any a) => M.Matrix a -> M.Matrix a 
+mixColumnsFwd = mixColumns mixCoulmnsConst 
+
+mixColumns :: (Any a) => M.Matrix a -> M.Matrix a -> M.Matrix a
+mixColumns const mat = 
     foldl1 
-        (\mat i -> mat M.<|> (\i -> multStd mixColumnsConst $ M.colVector $ M.getCol i mat)) 
+        (\mat i -> mat M.<|> (\i -> multStd const $ M.colVector $ M.getCol i mat)) 
             [1..(ncols mat)]
 
 mixColumnsConst :: Matrix Word8
@@ -57,7 +92,7 @@ mixColumnsConst = M.fromList [[2, 3, 1, 1],
                               [3, 1, 1, 2]]
 
 matToVec :: (Any a) => M.Matrix a -> Vector a
-matToVec mat = V.concat $ map (flip M.getRow mat) [0..(M.nRows mat)] 
+matToVec mat = V.concat $ V.map (flip M.getRow mat) $ V.fromList [0..(M.nRows mat)] 
 
 vecToMat :: V.Vector Word8 -> Int -> M.Matrix Word8
 vecToMat text bytes = 
@@ -74,7 +109,7 @@ expandKey key i
         keyMinusOne = expandKey key (i - 1)
 
 subWord :: V.Vector Word8 -> V.Vector Word8
-subWord = map sBox
+subWord = V.map sBox
 
 rotWord :: V.Vector Word8 -> V.Vector Word8
 rotWord key = tail key ++ [head key]
