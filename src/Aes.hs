@@ -13,7 +13,7 @@ decrypt :: B.ByteString -> B.ByteString -> B.ByteString -> B.ByteString
 decrypt ciphertext key iv = B.concat $ tail $ scanl (\t ikey ->
     let text = B.take (B.length key) $ B.drop ikey ciphertext
     in xorStr t $ (iterate (round ikey) (finalRound ikey text)) !! (((B.length key) `quot` 4) + 5))
-    iv $ [(B.length key), (B.length key) * 2, (B.length ciphertext)]
+    iv $ init [0, (B.length key)..(B.length ciphertext)]
     where
           round ikey text = invSubBytes $ matToStr $ invShiftRows key $ invMixColumns $ strToMat $ addRoundKey key ikey text
           finalRound ikey text = invSubBytes $ matToStr $ invShiftRows key $ strToMat $ addRoundKey key ikey text
@@ -49,7 +49,7 @@ encrypt plaintext key = do
     return $ (,) iv $ B.concat $ tail $ scanl (\t ikey -> 
         let text = xorStr key $ B.take (B.length key) $ B.drop ikey pptext
          in xorStr t $ finalRound ikey $ (iterate (round ikey) text !! 9))
-        iv [(B.length key), (B.length key) * 2, (B.length pptext)]
+        iv $ init [0, (B.length key)..(B.length pptext)]
     where pptext = pad plaintext key
           finalRound ikey text = addRoundKey key ikey $ matToStr $ 
             shiftRowsFwd key $ strToMat $ subWord text
@@ -63,7 +63,7 @@ randList :: Int -> IO [Word8]
 randList n = replicateM n $ randomRIO (0, 255)
 
 pad :: B.ByteString -> B.ByteString -> B.ByteString
-pad text key = B.concat [text, B.pack (replicate (rem (B.length text) (B.length key)) 0)]
+pad text key = B.concat [text, B.pack (replicate (rem (B.length key) (B.length text)) 0)]
 
 shiftRowsFwd :: B.ByteString -> M.Matrix Word8 -> M.Matrix Word8
 shiftRowsFwd = shiftRows rotWordVec 
