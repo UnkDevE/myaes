@@ -1,8 +1,6 @@
-module Aes (
-    encrypt,
-    decrypt
-) where
+module Aes where
 
+import qualified Data.ByteString as B
 import qualified Data.Vector as V
 import qualified Data.Matrix as M
 import System.Random (randomRIO)
@@ -11,17 +9,17 @@ import Data.Word8
 import Data.List
 import Data.Bits
 
-decrypt :: V.Vector Word8 -> V.Vector Word8 -> V.Vector Word8 -> V.Vector Word8
-decrypt ciphertext key iv = V.concat $ tail $ scanl (\t ikey ->
-    let text = V.take (V.length key) $ V.drop ikey ciphertext
-    in xorVec t $ (iterate (round ikey) (finalRound ikey text)) !! (((V.length key) `quot` 4) + 5))
-    iv $ [(V.length key), (V.length key) * 2, (V.length ciphertext)]
-    where byteLength = (V.length key `quot` 4)
-          round ikey text = invSubBytes $ matToVec $ invShiftRows key $ invMixColumns $ vecToMat byteLength $ addRoundKey key ikey text
-          finalRound ikey text = invSubBytes $ matToVec $ invShiftRows key $ vecToMat byteLength $ addRoundKey key ikey text
+decrypt :: B.ByteString -> B.ByteString -> B.ByteString -> B.ByteString
+decrypt ciphertext key iv = B.concat $ tail $ scanl (\t ikey ->
+    let text = B.take (B.length key) $ B.drop ikey ciphertext
+    in xorStr t $ (iterate (round ikey) (finalRound ikey text)) !! (((B.length key) `quot` 4) + 5))
+    iv $ [(B.length key), (B.length key) * 2, (B.length ciphertext)]
+    where
+          round ikey text = invSubBytes $ matToStr $ invShiftRows key $ invMixColumns $ strToMat $ addRoundKey key ikey text
+          finalRound ikey text = invSubBytes $ matToStr $ invShiftRows key $ strToMat $ addRoundKey key ikey text
 
 
-invShiftRows :: V.Vector Word8 -> M.Matrix Word8 -> M.Matrix Word8
+invShiftRows :: B.ByteString -> M.Matrix Word8 -> M.Matrix Word8
 invShiftRows = shiftRows invRotWord
 
 invRotWord :: V.Vector Word8 -> V.Vector Word8
@@ -37,43 +35,42 @@ invMixColumnsConst = M.fromList 4 4 $ map fromIntegral
                                  13, 9, 14, 11,
                                  11, 13, 9, 14]
 
-invSubBytes :: V.Vector Word8 -> V.Vector Word8
-invSubBytes = V.map invSBox
+invSubBytes :: B.ByteString -> B.ByteString
+invSubBytes = B.map invSBox
 
 invSBox :: Word8 -> Word8
 invSBox b =
     (rotateL (sBox b) 1) `xor` (rotateL (sBox b) 3) `xor` (rotateL (sBox b) 6) `xor` 5
 
-encrypt :: V.Vector Word8 -> V.Vector Word8 -> IO(V.Vector Word8, V.Vector Word8)
+encrypt :: B.ByteString -> B.ByteString -> IO(B.ByteString, B.ByteString)
 encrypt plaintext key = do
-    ivl <- randList (V.length pptext)
-    let iv = V.fromList ivl 
-    return $ (,) iv $ V.concat $ tail $ scanl (\t ikey -> 
-        let text = xorVec key $ V.take (V.length key) $ V.drop ikey pptext
-         in xorVec t $ finalRound ikey $ (iterate (round ikey) text !! ((V.length key `quot` 4) + 5)))
-        iv [(V.length key), (V.length key) * 2, (V.length pptext)]
+    ivl <- randList (B.length pptext)
+    let iv = B.pack ivl 
+    return $ (,) iv $ B.concat $ tail $ scanl (\t ikey -> 
+        let text = xorStr key $ B.take (B.length key) $ B.drop ikey pptext
+         in xorStr t $ finalRound ikey $ (iterate (round ikey) text !! 9))
+        iv [(B.length key), (B.length key) * 2, (B.length pptext)]
     where pptext = pad plaintext key
-          byteLength = V.length key `quot` 4
-          finalRound ikey text = addRoundKey key ikey $ matToVec $ 
-            shiftRowsFwd key $ vecToMat byteLength $ subWord text
-          round ikey text = addRoundKey key ikey $ matToVec $ 
-            mixColumnsFwd $ shiftRowsFwd key $ vecToMat byteLength $ subWord text
+          finalRound ikey text = addRoundKey key ikey $ matToStr $ 
+            shiftRowsFwd key $ strToMat $ subWord text
+          round ikey text = addRoundKey key ikey $ matToStr $ 
+            mixColumnsFwd $ shiftRowsFwd key $ strToMat $ subWord text
 
-addRoundKey :: V.Vector Word8 -> Int -> V.Vector Word8 -> V.Vector Word8
-addRoundKey key ikey = xorVec $ V.concat (map (expandKey key) [ikey..(ikey + V.length key)])
+addRoundKey :: B.ByteString -> Int -> B.ByteString -> B.ByteString
+addRoundKey key ikey = xorStr $ B.concat (map (expandKey key) [ikey..(ikey + B.length key)])
 
 randList :: Int -> IO [Word8] 
 randList n = replicateM n $ randomRIO (0, 255)
 
-pad :: V.Vector Word8 -> V.Vector Word8 -> V.Vector Word8
-pad text key = text V.++ V.fromList (replicate (rem (V.length text) (V.length key)) 0)
+pad :: B.ByteString -> B.ByteString -> B.ByteString
+pad text key = B.concat [text, B.pack (replicate (rem (B.length text) (B.length key)) 0)]
 
-shiftRowsFwd :: V.Vector Word8 -> M.Matrix Word8 -> M.Matrix Word8
-shiftRowsFwd = shiftRows rotWord 
+shiftRowsFwd :: B.ByteString -> M.Matrix Word8 -> M.Matrix Word8
+shiftRowsFwd = shiftRows rotWordVec 
 
-shiftRows :: (V.Vector Word8 -> V.Vector Word8) -> V.Vector Word8 -> M.Matrix Word8 -> M.Matrix Word8
+shiftRows :: (V.Vector Word8 -> V.Vector Word8) -> B.ByteString -> M.Matrix Word8 -> M.Matrix Word8
 shiftRows wordRotFn key mat = 
-    vecToMat ((V.length key) `quot` 4) $ V.concat $ map 
+    strToMat $ B.pack $ V.toList $ V.concat $ map 
         (\i -> (iterate wordRotFn (M.getRow i mat)) !! i) [1..(M.nrows mat)] 
  
 mixColumnsFwd :: M.Matrix Word8 -> M.Matrix Word8 
@@ -81,9 +78,9 @@ mixColumnsFwd = mixColumns mixColumnsConst
 
 mixColumns :: M.Matrix Word8 -> M.Matrix Word8 -> M.Matrix Word8 
 mixColumns const mat = 
-    foldl 
-        (\mat i -> mat M.<|> (M.multStd const $ M.colVector $ M.getCol i mat))
-            (M.zero 0 0) [1..(M.ncols mat)]
+        foldl1 (M.<|>) $ 
+            map (\i -> M.multStd const $ M.colVector $ M.getCol i mat)
+                [1..(M.ncols mat)]
 
 mixColumnsConst :: M.Matrix Word8
 mixColumnsConst = M.fromList 4 4 $ map fromIntegral 
@@ -93,43 +90,44 @@ mixColumnsConst = M.fromList 4 4 $ map fromIntegral
                               3, 1, 1, 2]
 
 
-matToVec :: M.Matrix a -> V.Vector a
-matToVec mat = V.concat $ map (flip M.getRow mat) [0..(M.nrows mat)] 
+matToStr :: M.Matrix Word8 -> B.ByteString 
+matToStr mat = B.concat $ map (\i -> B.pack $ V.toList $ M.getRow i mat) [1..(M.nrows mat)] 
 
-vecToMat :: Int -> V.Vector Word8 -> M.Matrix Word8
-vecToMat bytes text = 
-    foldr (\t mat -> mat M.<-> (M.colVector $ V.take bytes $ V.drop t text)) (M.zero 0 0)
-        [0..(((V.length text) `quot` bytes) - bytes)]
+strToMat :: B.ByteString -> M.Matrix Word8
+strToMat text = M.fromList 4 4 $ B.unpack text
 
-expandKey :: V.Vector Word8 -> Int -> V.Vector Word8
+expandKey :: B.ByteString -> Int -> B.ByteString
 expandKey key i
   | i < n = key
   | i >= n && rem i n == 0 = 
-        rCon (i `quot` n) `xorVec` 
-            keyMinusOne `xorVec` (subWord $ rotWord keyMinusOne)
-  | i >= n && n > 6 && rem i n == 4 = keyMinusOne `xorVec` 
+        rCon (i `quot` n) `xorStr` 
+            keyMinusOne `xorStr` (subWord $ rotWord keyMinusOne)
+  | i >= n && n > 6 && rem i n == 4 = keyMinusOne `xorStr` 
         subWord keyMinusOne 
-  | otherwise = keyMinusOne `xorVec` expandKey key (i - n)
-  where n = (V.length key `quot` 4)
+  | otherwise = keyMinusOne `xorStr` expandKey key (i - n)
+  where n = (B.length key `quot` 4)
         keyMinusOne = expandKey key (i - 1)
 
-xorVec :: V.Vector Word8 -> V.Vector Word8 -> V.Vector Word8
-xorVec key text = 
-        V.map (\(cbit, kbit) -> cbit `xor` kbit) $ V.zip text key 
+xorStr :: B.ByteString -> B.ByteString -> B.ByteString
+xorStr key text = 
+        B.pack $ map (\(cbit, kbit) -> cbit `xor` kbit) $ B.zip text key 
 
-subWord :: V.Vector Word8 -> V.Vector Word8
-subWord = V.map sBox
+subWord :: B.ByteString -> B.ByteString
+subWord = B.map sBox
 
-rotWord :: V.Vector Word8 -> V.Vector Word8
-rotWord key = V.tail key V.++ V.fromList [V.head key]
+rotWord :: B.ByteString -> B.ByteString
+rotWord key = B.concat [B.tail key, B.singleton $ B.head key]
+
+rotWordVec :: V.Vector Word8 -> V.Vector Word8
+rotWordVec key = V.tail key V.++ (V.singleton $ V.head key)
 
 sBox :: Word8 -> Word8
 sBox b = 
   xor 99 
     $ fromIntegral $ rem (fromIntegral b * 31) 257
 
-rCon :: Int -> V.Vector Word8
-rCon i = V.fromList $ (rc i):(replicate 3 0)
+rCon :: Int -> B.ByteString
+rCon i = B.pack $ (rc i):(replicate 3 0)
 
 rc :: Int -> Word8
 rc i

@@ -57,7 +57,7 @@ library
   -- other-extensions:
 
   -- Other library packages from which modules are imported.
-  build-depends:       vector,random,matrix,word8,base >=4.12 && <4.13
+  build-depends:       bytestring,vector,random,matrix,word8,base >=4.12 && <4.13
 
   -- Directories containing source files.
   hs-source-dirs:      src
@@ -77,7 +77,7 @@ executable myaes
   -- other-extensions:
 
   -- Other library packages from which modules are imported.
-  build-depends:       vector-binary-instances,binary,vector,random,matrix,word8,base >=4.12 && <4.13
+  build-depends:       bytestring,vector-binary-instances,binary,vector,random,matrix,word8,base >=4.12 && <4.13
 
   -- Directories containing source files.
   hs-source-dirs:      src
