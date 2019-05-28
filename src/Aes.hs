@@ -7,6 +7,7 @@ import qualified Data.Matrix as M
 import System.Random (randomRIO)
 import Control.Monad (replicateM)
 import Data.Word8
+import Data.Word
 import Data.List
 import Data.Bits
 
@@ -137,12 +138,17 @@ rotWordVec :: V.Vector GF -> V.Vector GF
 rotWordVec key = V.tail key V.++ (V.singleton $ V.head key)
 
 newtype GF = GF { runGF :: Word8 } deriving (Eq, Show, Read, Bits)
-
 instance Num GF where 
     (+) = xor
     (-) = xor
     _ * 0 = 0
-    a * b = GF ((fromIntegral $ runGF ((a `unsafeShiftL` 4) + (b `unsafeShiftL` 4))) `rem` 0x11b)
+    a * b = GF $ fromIntegral $ (binaryMul (toWord64 a) (toWord64 b)) `xor` 0x11b
+        where 
+           binaryMul a b
+                | a < b = binaryMul b a 
+                | fromIntegral b == 0 = a
+                | otherwise = shiftL a (countLeadingZeros b) + binaryMul a (clearBit b (countLeadingZeros b))
+           toWord64 c = (fromIntegral $ runGF c) :: Word64
     abs = id
     negate = id
     signum i 
