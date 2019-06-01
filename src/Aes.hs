@@ -13,21 +13,21 @@ import Data.Bits
 
 decrypt :: B.ByteString -> B.ByteString -> B.ByteString -> B.ByteString
 decrypt ciphertext key iv = B.concat $ tail $ scanl (\t ikey ->
-    let text = B.take (B.length key) $ B.drop ikey ciphertext
-    in xorStr t $ (iterate (round ikey) (finalRound ikey text)) !! (((B.length key) `quot` 4) + 5))
+    let text = xorStr t $ B.take (B.length key) $ B.drop ikey ciphertext
+    in xorStr key $ (iterate (round ikey) (finalRound ikey text)) !! (((B.length key) `quot` 4) + 5))
     iv $ init [0, (B.length key)..(B.length ciphertext)]
     where
-          round ikey text = invSubBytes $ matToStr $ invShiftRows key $ invMixColumns $ strToMat $ addRoundKey key ikey text
+          round ikey text = invSubBytes $ matToStr $ invShiftRows key $ invMixColumns $ word8MatrixToGF $ strToMat $ addRoundKey key ikey text
           finalRound ikey text = invSubBytes $ matToStr $ invShiftRows key $ strToMat $ addRoundKey key ikey text
 
 
-invShiftRows :: B.ByteString -> M.Matrix GF -> M.Matrix GF 
+invShiftRows :: B.ByteString -> M.Matrix Word8 -> M.Matrix Word8 
 invShiftRows = shiftRows invRotWord
 
-invRotWord :: V.Vector GF -> V.Vector GF 
+invRotWord :: V.Vector Word8 -> V.Vector Word8 
 invRotWord xs = V.last xs `V.cons` (V.init xs)
 
-invMixColumns :: M.Matrix GF -> M.Matrix GF 
+invMixColumns :: M.Matrix GF -> M.Matrix Word8
 invMixColumns = mixColumns invMixColumnsConst
 
 invMixColumnsConst :: M.Matrix GF 
@@ -71,7 +71,8 @@ encrypt plaintext key = do
           finalRound ikey text = addRoundKey key ikey $ matToStr $ 
             shiftRowsFwd key $ strToMat $ subWord text
           round ikey text = addRoundKey key ikey $ matToStr $ 
-            mixColumnsFwd $ shiftRowsFwd key $ strToMat $ subWord text
+           mixColumnsFwd $ word8MatrixToGF $ 
+                shiftRowsFwd key $ strToMat $ subWord text
 
 addRoundKey :: B.ByteString -> Int -> B.ByteString -> B.ByteString
 addRoundKey key ikey = xorStr $ B.concat (map (expandKey key) [ikey..(ikey + B.length key)])
@@ -82,20 +83,20 @@ randList n = replicateM n $ randomRIO (0, 255)
 pad :: B.ByteString -> B.ByteString -> B.ByteString
 pad text key = B.concat [text, B.pack (replicate (rem (B.length key) (B.length text)) 0)]
 
-shiftRowsFwd :: B.ByteString -> M.Matrix GF -> M.Matrix GF 
+shiftRowsFwd :: B.ByteString -> M.Matrix Word8 -> M.Matrix Word8 
 shiftRowsFwd = shiftRows rotWordVec 
 
-shiftRows :: (V.Vector GF -> V.Vector GF) -> B.ByteString -> M.Matrix GF -> M.Matrix GF 
+shiftRows :: (V.Vector Word8 -> V.Vector Word8 ) -> B.ByteString -> M.Matrix Word8 -> M.Matrix Word8  
 shiftRows wordRotFn key mat = 
-    strToMat $ B.pack $ V.toList $ V.map runGF $ V.concat $ map 
+    strToMat $ B.pack $ V.toList $ V.concat $ map 
         (\i -> (iterate wordRotFn (M.getRow i mat)) !! i) [1..(M.nrows mat)] 
  
-mixColumnsFwd :: M.Matrix GF -> M.Matrix GF  
+mixColumnsFwd :: M.Matrix GF -> M.Matrix Word8 
 mixColumnsFwd = mixColumns mixColumnsConst
 
-mixColumns :: M.Matrix GF -> M.Matrix GF -> M.Matrix GF 
+mixColumns :: M.Matrix GF -> M.Matrix GF -> M.Matrix Word8 
 mixColumns const mat = 
-        foldl1 (M.<|>) $ 
+        gfMatrixToWord8 $ foldl1 (M.<|>) $ 
             map (\i -> M.multStd const $ M.colVector $ M.getCol i mat)
                 [1..(M.ncols mat)]
 
@@ -106,11 +107,20 @@ mixColumnsConst = M.fromList 4 4 $ map fromIntegral
                               1, 1, 2, 3, 
                               3, 1, 1, 2]
 
-matToStr :: M.Matrix GF -> B.ByteString 
-matToStr mat = B.concat $ map (\i -> B.pack $ V.toList $ V.map runGF $ M.getRow i mat) [1..(M.nrows mat)] 
+word8MatrixToGF :: M.Matrix Word8 -> M.Matrix GF
+word8MatrixToGF mat = M.fromList 4 4 $ map (GF . fromIntegral) $ matToList mat
 
-strToMat :: B.ByteString -> M.Matrix GF 
-strToMat text = M.fromList 4 4 $ map GF $ B.unpack text
+gfMatrixToWord8 :: M.Matrix GF -> M.Matrix Word8
+gfMatrixToWord8 mat = M.fromList 4 4 $ map (fromIntegral . xor 0x11b . runGF) $ matToList mat
+
+matToStr :: M.Matrix Word8 -> B.ByteString 
+matToStr mat = B.concat $ map (\i -> B.pack $ V.toList $ M.getRow i mat) [1..(M.nrows mat)] 
+
+matToList :: M.Matrix a -> [a]
+matToList mat = concatMap (\i -> V.toList $ M.getRow i mat) [1..(M.nrows mat)] 
+
+strToMat :: B.ByteString -> M.Matrix Word8 
+strToMat text = M.fromList 4 4 $ B.unpack text
 
 expandKey :: B.ByteString -> Int -> B.ByteString
 expandKey key i
@@ -134,20 +144,20 @@ subWord = B.map sBox
 rotWord :: B.ByteString -> B.ByteString
 rotWord key = B.concat [B.tail key, B.singleton $ B.head key]
 
-rotWordVec :: V.Vector GF -> V.Vector GF 
+rotWordVec :: V.Vector Word8 -> V.Vector Word8 
 rotWordVec key = V.tail key V.++ (V.singleton $ V.head key)
 
-newtype GF = GF { runGF :: Word8 } deriving (Eq, Show, Read, Bits)
+newtype GF = GF { runGF :: Word32 } deriving (Eq, Show, Read, Bits)
 instance Num GF where 
     (+) = xor
     (-) = xor
     _ * 0 = 0
-    a * b = GF $ fromIntegral $ (binaryMul (toWord64 a) (toWord64 b)) `xor` 0x11b
+    a * b = GF $ fromIntegral $ binaryMul (runGF a) (runGF b)
         where 
            binaryMul a b
                 | a < b = binaryMul b a 
-                | fromIntegral b == 0 = a
-                | otherwise = shiftL a (countLeadingZeros b) + binaryMul a (clearBit b (countLeadingZeros b))
+                | fromIntegral b == 0 = 0
+                | otherwise = unsafeShiftL a (countTrailingZeros b) `xor` binaryMul a (clearBit b (countTrailingZeros b))
            toWord64 c = (fromIntegral $ runGF c) :: Word64
     abs = id
     negate = id
